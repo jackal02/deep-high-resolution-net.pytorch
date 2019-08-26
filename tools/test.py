@@ -21,7 +21,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 
-import _init_paths
+#import _init_paths
 from config import cfg
 from config import update_config
 from core.loss import JointsMSELoss
@@ -62,6 +62,12 @@ def parse_args():
                         type=str,
                         default='')
 
+    parser.add_argument('--unnanotImgsPath',
+                        help='annotations availability',
+                        type=str,
+                        default='')
+                        # default='/home/andrettin/Repo/POSE_ESTIMATION/deep-high-resolution-net.pytorch/data/mpii/images')
+
     args = parser.parse_args()
     return args
 
@@ -95,7 +101,7 @@ def main():
         logger.info('=> loading model from {}'.format(model_state_file))
         model.load_state_dict(torch.load(model_state_file))
 
-    model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
+    model = torch.nn.DataParallel(model, device_ids=[0]).cuda()
 
     # define loss function (criterion) and optimizer
     criterion = JointsMSELoss(
@@ -111,7 +117,8 @@ def main():
         transforms.Compose([
             transforms.ToTensor(),
             normalize,
-        ])
+        ]),
+        args.unnanotImgsPath if args.unnanotImgsPath != '' else None
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
@@ -123,7 +130,8 @@ def main():
 
     # evaluate on validation set
     validate(cfg, valid_loader, valid_dataset, model, criterion,
-             final_output_dir, tb_log_dir)
+             final_output_dir, tb_log_dir,
+             predict_only=True if args.unnanotImgsPath != '' else False)
 
 
 if __name__ == '__main__':

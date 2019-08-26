@@ -14,6 +14,7 @@ import os
 
 import numpy as np
 import torch
+import cv2
 
 from core.evaluate import accuracy
 from core.inference import get_final_preds
@@ -94,8 +95,23 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
                               prefix)
 
 
+def compute_joints(batch_image, batch_joints, batch_joints_vis):
+    for k in range(batch_image.size(0)):
+        image_tensor = batch_image[k]
+        image = image_tensor.mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        joints = batch_joints[k]
+        joints_vis = batch_joints_vis[k]
+        for joint in joints:
+            cv2.circle(image, (int(joint[0]), int(joint[1])), 2, [0, 0, 255], 2)
+
+        cv2.imshow("im", image)
+        cv2.waitKey()
+
+
 def validate(config, val_loader, val_dataset, model, criterion, output_dir,
-             tb_log_dir, writer_dict=None):
+             tb_log_dir, writer_dict=None, predict_only=False):
     batch_time = AverageMeter()
     losses = AverageMeter()
     acc = AverageMeter()
@@ -116,6 +132,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     with torch.no_grad():
         end = time.time()
         for i, (input, target, target_weight, meta) in enumerate(val_loader):
+            img = input.data[0].mul(255).clamp(0, 255).byte().permute(1, 2, 0).cpu().numpy()
+
             # compute output
             outputs = model(input)
             if isinstance(outputs, list):
@@ -147,12 +165,12 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
 
                 output = (output + output_flipped) * 0.5
 
+            num_images = input.size(0)
+
             target = target.cuda(non_blocking=True)
             target_weight = target_weight.cuda(non_blocking=True)
 
             loss = criterion(output, target, target_weight)
-
-            num_images = input.size(0)
             # measure accuracy and record loss
             losses.update(loss.item(), num_images)
             _, avg_acc, cnt, pred = accuracy(output.cpu().numpy(),
@@ -181,6 +199,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             image_path.extend(meta['image'])
 
             idx += num_images
+            compute_joints(input, pred*4, meta['joints_vis'])
 
             if i % config.PRINT_FREQ == 0:
                 msg = 'Test: [{0}/{1}]\t' \
@@ -196,18 +215,20 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 )
                 save_debug_images(config, input, meta, target, pred*4, output,
                                   prefix)
+        name_values = None
+        perf_indicator = None
+        if not predict_only:
+            name_values, perf_indicator = val_dataset.evaluate(
+                config, all_preds, output_dir, all_boxes, image_path,
+                filenames, imgnums
+            )
 
-        name_values, perf_indicator = val_dataset.evaluate(
-            config, all_preds, output_dir, all_boxes, image_path,
-            filenames, imgnums
-        )
-
-        model_name = config.MODEL.NAME
-        if isinstance(name_values, list):
-            for name_value in name_values:
-                _print_name_value(name_value, model_name)
-        else:
-            _print_name_value(name_values, model_name)
+            model_name = config.MODEL.NAME
+            if isinstance(name_values, list):
+                for name_value in name_values:
+                    _print_name_value(name_value, model_name)
+            else:
+                _print_name_value(name_values, model_name)
 
         if writer_dict:
             writer = writer_dict['writer']
@@ -222,19 +243,22 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 acc.avg,
                 global_steps
             )
-            if isinstance(name_values, list):
-                for name_value in name_values:
+
+            if not predict_only:
+                if isinstance(name_values, list):
+                    for name_value in name_values:
+                        writer.add_scalars(
+                            'valid',
+                            dict(name_value),
+                            global_steps
+                        )
+                else:
                     writer.add_scalars(
                         'valid',
-                        dict(name_value),
+                        dict(name_values),
                         global_steps
                     )
-            else:
-                writer.add_scalars(
-                    'valid',
-                    dict(name_values),
-                    global_steps
-                )
+
             writer_dict['valid_global_steps'] = global_steps + 1
 
     return perf_indicator

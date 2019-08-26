@@ -174,6 +174,10 @@ class JointsDataset(Dataset):
         if self.transform:
             input = self.transform(input)
 
+        input = cv2.resize(data_numpy, (256, 256), interpolation=cv2.INTER_LINEAR)
+        input = cv2.normalize(input, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+        input = torch.from_numpy(input).permute(2, 0, 1).float()
+
         for i in range(self.num_joints):
             if joints_vis[i, 0] > 0.0:
                 joints[i, 0:2] = affine_transform(joints[i, 0:2], trans)

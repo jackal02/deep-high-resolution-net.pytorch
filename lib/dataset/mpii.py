@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class MPIIDataset(JointsDataset):
-    def __init__(self, cfg, root, image_set, is_train, transform=None):
+    def __init__(self, cfg, root, image_set, is_train, transform=None, unannot_imgs_path=None):
         super().__init__(cfg, root, image_set, is_train, transform)
 
         self.num_joints = 16
@@ -33,10 +33,13 @@ class MPIIDataset(JointsDataset):
         self.upper_body_ids = (7, 8, 9, 10, 11, 12, 13, 14, 15)
         self.lower_body_ids = (0, 1, 2, 3, 4, 5, 6)
 
-        self.db = self._get_db()
+        if unannot_imgs_path is None:
+            self.db = self._get_db()
 
-        if is_train and cfg.DATASET.SELECT_DATA:
-            self.db = self.select_data(self.db)
+            if is_train and cfg.DATASET.SELECT_DATA:
+                self.db = self.select_data(self.db)
+        else:
+            self.db = self._get_db_raw(unannot_imgs_path)
 
         logger.info('=> load {} samples'.format(len(self.db)))
 
@@ -86,6 +89,24 @@ class MPIIDataset(JointsDataset):
                     'scale': s,
                     'joints_3d': joints_3d,
                     'joints_3d_vis': joints_3d_vis,
+                    'filename': '',
+                    'imgnum': 0,
+                }
+            )
+
+        return gt_db
+
+    def _get_db_raw(self, unannot_imgs_path):
+        gt_db = []
+
+        for image_name in os.listdir(unannot_imgs_path):
+            gt_db.append(
+                {
+                    'image': os.path.join(unannot_imgs_path, image_name),
+                    'center': np.array([0, 0]),
+                    'scale': np.array([1., 1.]),
+                    'joints_3d': np.ones((16, 3)),
+                    'joints_3d_vis': np.ones((16, 3)),
                     'filename': '',
                     'imgnum': 0,
                 }
